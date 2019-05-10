@@ -443,17 +443,28 @@ if __name__ == '__main__':
 #         include=None,
 #         reprocess=False, repo_depth=1)
 
-    from banana.study.mri.dwi import DwiStudy
+    from banana.study.mri.t2 import T2Study
 
     PipelineTester.generate_test_data(
-        DwiStudy, '/Users/tclose/Data/dwi', 'TESTBANANADWI',
-        in_server=None, out_server='https://mbi-xnat.erc.monash.edu.au',
-        work_dir='/Users/tclose/Data/dwi-work',
-        skip=['dwi_reference', 'coreg_ref_wmseg', 'field_map_mag',
-              'field_map_phase', 'moco', 'align_mats', 'moco_par',
-              'field_map_delta_te', 'norm_intensity',
-              'norm_intens_fa_template', 'norm_intens_wm_mask'],
+        T2Study, '/Users/tclose/Data/t2', 'TESTBANANAT2',
+        in_server=None, out_server='http://mbi-xnat.erc.monash.edu.au',
+        work_dir='/Users/tclose/Data/t2-work',
+        skip=['t2_coreg'],
         skip_bases=[MriStudy],
-        parameters={
-            'num_global_tracks': int(1e6)}, include=None,
+        include=None,
         reprocess=False, repo_depth=1)
+
+#     from banana.study.mri.dwi import DwiStudy
+# 
+#     PipelineTester.generate_test_data(
+#         DwiStudy, '/Users/tclose/Data/dwi', 'TESTBANANADWI',
+#         in_server=None, out_server='https://mbi-xnat.erc.monash.edu.au',
+#         work_dir='/Users/tclose/Data/dwi-work',
+#         skip=['dwi_reference', 'coreg_ref_wmseg', 'field_map_mag',
+#               'field_map_phase', 'moco', 'align_mats', 'moco_par',
+#               'field_map_delta_te', 'norm_intensity',
+#               'norm_intens_fa_template', 'norm_intens_wm_mask'],
+#         skip_bases=[MriStudy],
+#         parameters={
+#             'num_global_tracks': int(1e6)}, include=None,
+#         reprocess=False, repo_depth=1)
