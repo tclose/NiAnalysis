@@ -586,7 +586,7 @@ class MeanDisplacementCalculation(BaseInterface):
                               int(end_scan * 1000)] = np.array(
                                   [mp, ] * duration).T
         start_times.append((
-            dt.datetime.strptime(study_start_time, '%H%M%S.%f') +
+            dt.datetime.strptime(str(study_start_time), '%H%M%S.%f') +
             dt.timedelta(seconds=end_scan)).strftime('%H%M%S.%f'))
         mean_displacement_consecutive = []
 
@@ -1458,7 +1458,7 @@ class FixedBinning(BaseInterface):
 
         scan_duration = np.cumsum(np.asarray(start_times_diff))
 
-        pet_st = (dt.datetime.strptime(pet_start_time, '%H%M%S.%f') +
+        pet_st = (dt.datetime.strptime(str(pet_start_time), '%H%M%S.%f') +
                   dt.timedelta(seconds=pet_offset))
         PetBins = [pet_st + dt.timedelta(seconds=x) for x in
                    range(0, pet_len, bin_len)]

@@ -85,6 +85,7 @@ if __name__ == "__main__":
                                 else StaticEnv()),
                             repository=repository, inputs=inputs,
                             subject_ids=[sub_id], visit_ids=[session_id])
+                            
     study.data('motion_detection_output')
 
 print('Done!')
