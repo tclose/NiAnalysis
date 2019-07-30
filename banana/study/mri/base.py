@@ -434,7 +434,8 @@ class MriStudy(Study, metaclass=StudyMetaClass):
                     ants.resampling.ApplyTransforms(
                         interpolation='Linear',
                         input_image_type=3,
-                        invert_transform_flags=[True, True, False]),
+                        #invert_transform_flags=[True, True, False]
+                        ),
                     inputs={
                         'input_image': ('brain_mask', nifti_gz_format),
                         'reference_image': ('coreg_ref_brain',
