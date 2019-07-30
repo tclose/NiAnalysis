@@ -79,7 +79,7 @@ if __name__ == "__main__":
             raise
 
     study = MotionDetection(name='MotionDetection',
-                            processor=MultiProc(WORK_PATH, prov_ignore=(MultiProc.DEFAULT_PROV_IGNORE + ['.*/pkg_version', '/workflow/.*'])),
+                            processor=MultiProc(WORK_PATH, prov_ignore=(MultiProc.DEFAULT_PROV_IGNORE + ['/workflow/.*'])),
                             environment=(
                                 ModulesEnv() if args.environment == 'modules'
                                 else StaticEnv()),
