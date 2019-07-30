@@ -113,7 +113,7 @@ class DwiStudy(EpiSeriesStudy, metaclass=StudyMetaClass):
     add_param_specs = [
         ParamSpec('multi_tissue', True,
                   desc=("")),
-        ParamSpec('preproc_pe_dir', None, dtype=str,
+        ParamSpec('preproc_pe_dir', "RL", dtype=str,
                   desc=("")),
         ParamSpec('tbss_skel_thresh', 0.2,
                   desc=("")),
