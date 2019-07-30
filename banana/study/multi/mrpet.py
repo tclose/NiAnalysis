@@ -1,36 +1,33 @@
-from arcana.data import FilesetSpec, FieldSpec, InputFilesetSpec
-from banana.file_format import (
-    nifti_gz_format, directory_format, text_format, png_format, dicom_format,
-    text_matrix_format, motion_mats_format)
-from banana.interfaces.custom.motion_correction import (
-    MeanDisplacementCalculation, MotionFraming, PlotMeanDisplacementRC,
-    AffineMatAveraging, PetCorrectionFactor, CreateMocoSeries, FixedBinning,
-    UmapAlign2Reference, ReorientUmap)
+import os
+import logging
+
+import nipype.interfaces.fsl as fsl
+from nipype.interfaces.utility import Merge
+from nipype.interfaces.fsl.preprocess import FLIRT
+from nipype.interfaces.fsl.utils import ImageMaths
+from nipype.interfaces.ants.resampling import ApplyTransforms
+
+from arcana.data import FilesetSpec, FieldSpec, InputFilesetSpec, InputFilesets
+from arcana.utils.interfaces import CopyToDir, ListDir, dicom_fname_sort_key
+from arcana.exceptions import ArcanaNameError
+from arcana.study import ParamSpec, SwitchSpec
+from arcana.study.multi import MultiStudy, SubStudySpec, MultiStudyMetaClass
+
 from banana.citation import fsl_cite
-from arcana.study.multi import (
-    MultiStudy, SubStudySpec, MultiStudyMetaClass)
+from banana.requirement import fsl_req, mrtrix_req, ants_req
+from banana.file_format import nifti_gz_format, directory_format, text_format, png_format, dicom_format
+from banana.file_format import text_matrix_format, motion_mats_format
+from banana.interfaces.custom.motion_correction import MeanDisplacementCalculation, MotionFraming, PlotMeanDisplacementRC
+from banana.interfaces.custom.motion_correction import AffineMatAveraging, PetCorrectionFactor, CreateMocoSeries, FixedBinning
+from banana.interfaces.custom.motion_correction import UmapAlign2Reference, ReorientUmap
+from banana.interfaces.custom.pet import CheckPetMCInputs, PetImageMotionCorrection, StaticPETImageGeneration, PETFovCropping
+from banana.interfaces.converters import Nii2Dicom
+from banana.interfaces.ants import AntsRegSyn
 from banana.study.mri.epi import EpiSeriesStudy
 from banana.study.mri.t1 import T1Study
 from banana.study.mri.t2 import T2Study
-from nipype.interfaces.utility import Merge
 from banana.study.mri.dwi import DwiStudy, DwiRefStudy
-from banana.requirement import fsl_req, mrtrix_req, ants_req
-from arcana.exceptions import ArcanaNameError
-from arcana.data import InputFilesets
-import logging
 from banana.study.pet.base import PetStudy
-from banana.interfaces.custom.pet import (
-    CheckPetMCInputs, PetImageMotionCorrection, StaticPETImageGeneration,
-    PETFovCropping)
-from arcana.study import ParamSpec, SwitchSpec
-import os
-from banana.interfaces.converters import Nii2Dicom
-from arcana.utils.interfaces import CopyToDir, ListDir, dicom_fname_sort_key
-from nipype.interfaces.fsl.preprocess import FLIRT
-import nipype.interfaces.fsl as fsl
-from nipype.interfaces.fsl.utils import ImageMaths
-from banana.interfaces.ants import AntsRegSyn
-from nipype.interfaces.ants.resampling import ApplyTransforms
 
 
 logger = logging.getLogger('Arcana')
@@ -58,60 +55,37 @@ class MotionDetectionMixin(MultiStudy, metaclass=MultiStudyMetaClass):
 
     add_data_specs = [
         InputFilesetSpec('pet_data_dir', directory_format, optional=True),
-        InputFilesetSpec('pet_data_reconstructed', directory_format,
-                         optional=True),
+        InputFilesetSpec('pet_data_reconstructed',
+                         directory_format, optional=True),
         InputFilesetSpec('struct2align', nifti_gz_format, optional=True),
         InputFilesetSpec('umap', dicom_format, optional=True),
-        FilesetSpec('pet_data_prepared', directory_format,
-                    'prepare_pet_pipeline'),
-        FilesetSpec('static_motion_correction_results', directory_format,
-                    'motion_correction_pipeline'),
-        FilesetSpec('dynamic_motion_correction_results', directory_format,
-                    'motion_correction_pipeline'),
-        FilesetSpec('mean_displacement', text_format,
-                    'mean_displacement_pipeline'),
-        FilesetSpec('mean_displacement_rc', text_format,
-                    'mean_displacement_pipeline'),
-        FilesetSpec('mean_displacement_consecutive', text_format,
-                    'mean_displacement_pipeline'),
-        FilesetSpec('mats4average', text_format,
-                    'mean_displacement_pipeline'),
-        FilesetSpec('start_times', text_format,
-                    'mean_displacement_pipeline'),
-        FilesetSpec('motion_par_rc', text_format,
-                    'mean_displacement_pipeline'),
-        FilesetSpec('motion_par', text_format,
-                    'mean_displacement_pipeline'),
-        FilesetSpec('offset_indexes', text_format,
-                    'mean_displacement_pipeline'),
-        FilesetSpec('severe_motion_detection_report', text_format,
-                    'mean_displacement_pipeline'),
-        FilesetSpec('frame_start_times', text_format,
-                    'motion_framing_pipeline'),
-        FilesetSpec('frame_vol_numbers', text_format,
-                    'motion_framing_pipeline'),
-        FilesetSpec('timestamps', directory_format,
-                    'motion_framing_pipeline'),
-        FilesetSpec('mean_displacement_plot', png_format,
-                    'plot_mean_displacement_pipeline'),
-        FilesetSpec('rotation_plot', png_format,
-                    'plot_mean_displacement_pipeline'),
-        FilesetSpec('translation_plot', png_format,
-                    'plot_mean_displacement_pipeline'),
-        FilesetSpec('average_mats', directory_format,
-                    'frame_mean_transformation_mats_pipeline'),
-        FilesetSpec('correction_factors', text_format,
-                    'pet_correction_factors_pipeline'),
-        FilesetSpec('umaps_align2ref', directory_format,
-                    'umap_realignment_pipeline'),
-        FilesetSpec('umap_aligned_dicoms', directory_format,
-                    'nifti2dcm_conversion_pipeline'),
-        FilesetSpec('motion_detection_output', directory_format,
-                    'gather_outputs_pipeline'),
-        FilesetSpec('moco_series', directory_format,
-                    'create_moco_series_pipeline'),
-        FilesetSpec('fixed_binning_mats', directory_format,
-                    'fixed_binning_pipeline'),
+
+        FilesetSpec('pet_data_prepared', directory_format, 'prepare_pet_pipeline'),
+        FilesetSpec('static_motion_correction_results', directory_format, 'motion_correction_pipeline'),
+        FilesetSpec('dynamic_motion_correction_results', directory_format, 'motion_correction_pipeline'),
+        FilesetSpec('mean_displacement', text_format, 'mean_displacement_pipeline'),
+        FilesetSpec('mean_displacement_rc', text_format, 'mean_displacement_pipeline'),
+        FilesetSpec('mean_displacement_consecutive', text_format, 'mean_displacement_pipeline'),
+        FilesetSpec('mats4average', text_format, 'mean_displacement_pipeline'),
+        FilesetSpec('start_times', text_format, 'mean_displacement_pipeline'),
+        FilesetSpec('motion_par_rc', text_format, 'mean_displacement_pipeline'),
+        FilesetSpec('motion_par', text_format, 'mean_displacement_pipeline'),
+        FilesetSpec('offset_indexes', text_format, 'mean_displacement_pipeline'),
+        FilesetSpec('severe_motion_detection_report', text_format, 'mean_displacement_pipeline'),
+        FilesetSpec('frame_start_times', text_format, 'motion_framing_pipeline'),
+        FilesetSpec('frame_vol_numbers', text_format, 'motion_framing_pipeline'),
+        FilesetSpec('timestamps', directory_format, 'motion_framing_pipeline'),
+        FilesetSpec('mean_displacement_plot', png_format, 'plot_mean_displacement_pipeline'),
+        FilesetSpec('rotation_plot', png_format, 'plot_mean_displacement_pipeline'),
+        FilesetSpec('translation_plot', png_format, 'plot_mean_displacement_pipeline'),
+        FilesetSpec('average_mats', directory_format, 'frame_mean_transformation_mats_pipeline'),
+        FilesetSpec('correction_factors', text_format, 'pet_correction_factors_pipeline'),
+        FilesetSpec('umaps_align2ref', directory_format, 'umap_realignment_pipeline'),
+        FilesetSpec('umap_aligned_dicoms', directory_format, 'nifti2dcm_conversion_pipeline'),
+        FilesetSpec('motion_detection_output', directory_format, 'gather_outputs_pipeline'),
+        FilesetSpec('moco_series', directory_format, 'create_moco_series_pipeline'),
+        FilesetSpec('fixed_binning_mats', directory_format, 'fixed_binning_pipeline'),
+
         FieldSpec('pet_duration', int, 'pet_header_extraction_pipeline'),
         FieldSpec('pet_end_time', str, 'pet_header_extraction_pipeline'),
         FieldSpec('pet_start_time', str, 'pet_header_extraction_pipeline')]
@@ -123,10 +97,8 @@ class MotionDetectionMixin(MultiStudy, metaclass=MultiStudyMetaClass):
         ParamSpec('md_framing', True),
         ParamSpec('align_pct', False),
         ParamSpec('align_fixed_binning', False),
-        ParamSpec('moco_template', os.path.join(
-            reference_path, 'moco_template.IMA')),
-        ParamSpec('PET_template_MNI', os.path.join(
-            template_path, 'PET_template_MNI.nii.gz')),
+        ParamSpec('moco_template', os.path.join(reference_path, 'moco_template.IMA')),
+        ParamSpec('PET_template_MNI', os.path.join(template_path, 'PET_template_MNI.nii.gz')),
         ParamSpec('fixed_binning_n_frames', 0),
         ParamSpec('pet_offset', 0),
         ParamSpec('fixed_binning_bin_len', 60),
@@ -143,8 +115,7 @@ class MotionDetectionMixin(MultiStudy, metaclass=MultiStudyMetaClass):
 
         pipeline = self.new_pipeline(
             name='mean_displacement_calculation',
-            desc=("Calculate the mean displacement between each motion"
-                  " matrix and a reference."),
+            desc=("Calculate the mean displacement between each motion matrix and a reference."),
             citations=[fsl_cite],
             name_maps=name_maps)
 
@@ -154,6 +125,7 @@ class MotionDetectionMixin(MultiStudy, metaclass=MultiStudyMetaClass):
         real_duration_in = {}
         merge_index = 1
         input_names = []
+
         for spec in self.substudy_specs():
             try:
                 spec.map('motion_mats')
@@ -219,8 +191,7 @@ class MotionDetectionMixin(MultiStudy, metaclass=MultiStudyMetaClass):
 
         pipeline = self.new_pipeline(
             name='motion_framing',
-            desc=("Calculate when the head movement exceeded a "
-                  "predefined threshold (default 2mm)."),
+            desc=("Calculate when the head movement exceeded a predefined threshold (default 2mm)."),
             citations=[fsl_cite],
             name_maps=name_maps)
 
@@ -759,6 +730,7 @@ def create_motion_detection_class(name, ref=None, ref_type=None, t1s=None,
             InputFilesets('epi_{}_series'.format(i), epi_scan, dicom_format)
             for i, epi_scan in enumerate(epis))
         run_pipeline = True
+
     if dwis:
         unused_dwi = []
         dwis_main = [x for x in dwis if x[-1] == '0']
@@ -767,6 +739,7 @@ def create_motion_detection_class(name, ref=None, ref_type=None, t1s=None,
         b0_refspec = ref_spec.copy()
         b0_refspec.update({'coreg_ref_wmseg': 'ref_wm_seg',
                            'coreg_ref': 'ref_mag_preproc'})
+
         if dwis_main and not dwis_opposite:
             logger.warning(
                 'No opposite phase encoding direction b0 provided. DWI '
@@ -779,6 +752,7 @@ def create_motion_detection_class(name, ref=None, ref_type=None, t1s=None,
                 InputFilesets('dwi_{}_series'.format(i),
                               dwis_main_scan[0], dicom_format)
                 for i, dwis_main_scan in enumerate(dwis_main))
+
         if dwis_main and dwis_opposite:
             study_specs.extend(
                 SubStudySpec('dwi_{}'.format(i), DwiStudy, ref_spec)
@@ -797,6 +771,7 @@ def create_motion_detection_class(name, ref=None, ref_type=None, t1s=None,
                                             dwis_opposite[0][0],
                                             dicom_format)
                               for i in range(len(dwis_main)))
+
         if dwis_opposite and dwis_main and not dwis_ref:
             study_specs.extend(
                 SubStudySpec('b0_{}'.format(i), DwiRefStudy, b0_refspec)
@@ -812,6 +787,7 @@ def create_motion_detection_class(name, ref=None, ref_type=None, t1s=None,
                 inputs.extend(InputFilesets('b0_{}_reverse_phase'.format(i),
                                             dwis_main[0][0], dicom_format)
                               for i in range(len(dwis_opposite)))
+
         elif dwis_opposite and dwis_ref:
             min_index = min(len(dwis_opposite), len(dwis_ref))
             study_specs.extend(
@@ -829,8 +805,10 @@ def create_motion_detection_class(name, ref=None, ref_type=None, t1s=None,
                                          dwis_opposite[:min_index]))
             unused_dwi = [scan for scan in dwis_ref[min_index:] +
                           dwis_opposite[min_index:]]
+
         elif dwis_opposite or dwis_ref:
             unused_dwi = [scan for scan in dwis_ref + dwis_opposite]
+
         if unused_dwi:
             logger.info(
                 'The following scans:\n{}\nwere not assigned during the DWI '
@@ -845,6 +823,7 @@ def create_motion_detection_class(name, ref=None, ref_type=None, t1s=None,
                 InputFilesets('t2_{}_magnitude'.format(i), scan[0],
                               dicom_format)
                 for i, scan in enumerate(unused_dwi, start=len(t2s)))
+
         run_pipeline = True
 
     if not run_pipeline:
@@ -977,7 +956,7 @@ def create_motion_detection_class(name, ref=None, ref_type=None, t1s=None,
 #         unused_dwi = []
 #         dwis_main = [x for x in dwis if x[-1] == '0']
 #         dwis_ref = [x for x in dwis if x[-1] == '1']
-#         dwis_opposite = [x for x in dwis if x[-1] == '-1']
+#         dwis_opposite = [x for x in dwis if x[-1] == '-1']https://github.com/szho42/banana.git
 #         dwi_refspec = ref_spec.copy()
 #         dwi_refspec.update({'ref_wm_seg': 'coreg_ref_wmseg',
 #                             'ref_preproc': 'coreg_ref'})

@@ -8,7 +8,7 @@ from banana.utils.moco import (
     guess_scan_type, local_motion_detection, inputs_generation)
 import argparse
 import pickle as pkl
-from arcana import SingleProc, ModulesEnv, StaticEnv
+from arcana import MultiProc, ModulesEnv, StaticEnv
 
 
 class MoCoDataLoader(object):
@@ -79,7 +79,7 @@ if __name__ == "__main__":
             raise
 
     study = MotionDetection(name='MotionDetection',
-                            processor=SingleProc(WORK_PATH),
+                            processor=MultiProc(WORK_PATH),
                             environment=(
                                 ModulesEnv() if args.environment == 'modules'
                                 else StaticEnv()),
