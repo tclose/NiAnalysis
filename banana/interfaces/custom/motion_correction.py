@@ -1,40 +1,36 @@
-
-from nipype.interfaces.base import (BaseInterface, BaseInterfaceInputSpec,
-                                    traits, File, TraitedSpec, Directory,
-                                    InputMultiPath)
-import numpy as np
-from nipype.utils.filemanip import split_filename
 import os
 import os.path as op
 import glob
 import shutil
-import nibabel as nib
-from nipype.interfaces.base import isdefined
-import scipy.ndimage.measurements as snm
 import datetime as dt
+import math
+
+import numpy as np
+import nibabel as nib
+import scipy.ndimage.measurements as snm
+import pydicom
+import subprocess as sp
+
+from nipype.utils.filemanip import split_filename
+from nipype.interfaces.base import isdefined
+from nipype.interfaces import fsl
+from nipype.interfaces.base import BaseInterface, BaseInterfaceInputSpec
+from nipype.interfaces.base import traits, File, TraitedSpec, Directory, InputMultiPath
+
 try:
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plot
 except ImportError:
     pass
-from nipype.interfaces import fsl
-import pydicom
-import math
-import subprocess as sp
-
 
 class MotionMatCalculationInputSpec(BaseInterfaceInputSpec):
 
     reg_mat = File(exists=True, desc='Registration matrix')
     qform_mat = File(exists=True, desc='Qform matrix')
-    dummy_input = Directory(desc='Dummy input in order to make the reference '
-                            'motion mat pipeline work')
-    align_mats = Directory(exists=True, desc='Directory with intra-scan '
-                           'alignment matrices', default=None)
-    reference = traits.Bool(desc='If True, the pipeline will save just an '
-                            'identity matrix (motion mats for reference scan)',
-                            default=False)
+    dummy_input = Directory(desc='Dummy input in order to make the reference motion mat pipeline work')
+    align_mats = Directory(exists=True, desc='Directory with intra-scan alignment matrices', default=None)
+    reference = traits.Bool(desc='If True, the pipeline will save just an identity matrix (motion mats for reference scan)', default=False)
 
 
 class MotionMatCalculationOutputSpec(TraitedSpec):
@@ -52,15 +48,18 @@ class MotionMatCalculation(BaseInterface):
 
         reference = self.inputs.reference
         dummy = self.inputs.dummy_input
+
         if reference:
             np.savetxt('reference_motion_mat.mat', np.eye(4))
             np.savetxt('reference_motion_mat_inv.mat', np.eye(4))
             out_name = 'ref_motion_mats'
             mm = glob.glob('*motion_mat*.mat')
+
         else:
             reg_mat = np.loadtxt(self.inputs.reg_mat)
             qform_mat = np.loadtxt(self.inputs.qform_mat)
             _, out_name, _ = split_filename(self.inputs.reg_mat)
+
             if self.inputs.align_mats:
                 list_mats = sorted(glob.glob(self.inputs.align_mats + '/MAT*'))
                 if not list_mats:
@@ -507,22 +506,24 @@ class MeanDisplacementCalculation(BaseInterface):
 
     def _run_interface(self, runtime):
 
-        list_inputs = list(zip(
-            self.inputs.motion_mats, self.inputs.start_times,
-            self.inputs.real_durations, self.inputs.trs,
-            self.inputs.input_names))
+        list_inputs = list(zip(self.inputs.motion_mats, 
+                                self.inputs.start_times,
+                                self.inputs.real_durations, 
+                                self.inputs.trs,
+                                self.inputs.input_names))
+
         ref = nib.load(self.inputs.reference)
         ref_data = ref.get_data()
-        # centre of gravity
-        ref_cog = np.asarray(snm.center_of_mass(ref_data))
+        ref_cog = np.asarray(snm.center_of_mass(ref_data)) # centre of gravity
         list_inputs = sorted(list_inputs, key=lambda k: k[1])
         study_start_time = list_inputs[0][1]
+
         list_inputs = [
-            (x[0], (dt.datetime.strptime(x[1], '%H%M%S.%f') -
-                    dt.datetime.strptime(list_inputs[0][1], '%H%M%S.%f'))
+            (x[0], (dt.datetime.strptime(str(x[1]), '%H%M%S.%f') -
+                    dt.datetime.strptime(str(list_inputs[0][1]), '%H%M%S.%f'))
              .total_seconds(), x[2], x[3], x[4]) for x in list_inputs]
-        study_len = int((list_inputs[-1][1] + float(list_inputs[-1][2])) *
-                        1000)
+             
+        study_len = int((list_inputs[-1][1] + float(list_inputs[-1][2])) * 1000)
         mean_displacement_rc = np.zeros(study_len) - 1
         motion_par_rc = np.zeros((6, study_len)) - 1
         mean_displacement = []
@@ -539,6 +540,7 @@ class MeanDisplacementCalculation(BaseInterface):
             ' are scans with very different mean displacement with respect '
             'to the others.\nIn that case please check the registration of '
             'that particular scan.']
+
         for f in list_inputs:
             mats = sorted(glob.glob(f[0] + '/*inv.mat'))
             mats4averge = sorted(glob.glob(f[0] + '/*mat.mat'))
@@ -546,34 +548,31 @@ class MeanDisplacementCalculation(BaseInterface):
             all_mats4average = all_mats4average + mats4averge
             start_scan = f[1]
             tr = f[3]
+
             if len(mats) > 1:  # for 4D files
                 for i, mat in enumerate(mats):
-                    volume_names.append(f[-1] + '_vol_{}'
-                                        .format(str(i + 1).zfill(4)))
+                    volume_names.append(f[-1] + '_vol_{}'.format(str(i + 1).zfill(4)))
                     start_times.append((
-                        dt.datetime.strptime(
-                            study_start_time, '%H%M%S.%f') +
-                        dt.timedelta(seconds=start_scan)).strftime(
-                            '%H%M%S.%f'))
+                        dt.datetime.strptime(str(study_start_time), '%H%M%S.%f') +
+                        dt.timedelta(seconds=start_scan)).strftime('%H%M%S.%f'))
+
                     end_scan = start_scan + tr
                     m = np.loadtxt(mat)
                     md = self.rmsdiff(ref_cog, m, idt_mat)
-                    mean_displacement_rc[
-                        int(start_scan * 1000):int(end_scan * 1000)] = md
+                    mean_displacement_rc[int(start_scan * 1000):int(end_scan * 1000)] = md
                     mean_displacement.append(md)
                     mp = self.avscale(m, ref_cog)
                     motion_par.append(mp)
                     duration = int(end_scan * 1000) - int(start_scan * 1000)
-                    motion_par_rc[:, int(start_scan * 1000):
-                                  int(end_scan * 1000)] = np.array(
-                                      [mp, ] * duration).T
+                    motion_par_rc[:, int(start_scan * 1000):int(end_scan * 1000)] = np.array([mp, ] * duration).T
                     start_scan = end_scan
+
             elif len(mats) == 1:  # for 3D files
                 volume_names.append(f[-1])
                 start_times.append((
-                    dt.datetime.strptime(study_start_time,
-                                         '%H%M%S.%f') +
+                    dt.datetime.strptime(str(study_start_time), '%H%M%S.%f') +
                     dt.timedelta(seconds=start_scan)).strftime('%H%M%S.%f'))
+
                 end_scan = start_scan + float(f[2])
                 m = np.loadtxt(mats[0])
                 md = self.rmsdiff(ref_cog, m, idt_mat)
@@ -590,6 +589,7 @@ class MeanDisplacementCalculation(BaseInterface):
             dt.datetime.strptime(study_start_time, '%H%M%S.%f') +
             dt.timedelta(seconds=end_scan)).strftime('%H%M%S.%f'))
         mean_displacement_consecutive = []
+
         for i in range(len(all_mats) - 1):
             m1 = np.loadtxt(all_mats[i])
             m2 = np.loadtxt(all_mats[i + 1])
@@ -597,6 +597,7 @@ class MeanDisplacementCalculation(BaseInterface):
             mean_displacement_consecutive.append(md_consecutive)
 
         corrupted_volumes = self.check_max_motion(motion_par)
+
         if corrupted_volumes:
             corrupted_volume_names = [
                 'The following volumes showed an unusual severe motion (i.e. '
@@ -607,11 +608,14 @@ class MeanDisplacementCalculation(BaseInterface):
             corrupted_volume_names = (
                 corrupted_volume_names + [volume_names[x]
                                           for x in corrupted_volumes])
+
         offset_indexes = np.where(mean_displacement_rc == -1)
+
         for i in range(len(mean_displacement_rc)):
             if (mean_displacement_rc[i] == -1 and
                     mean_displacement_rc[i - 1] != -1):
                 mean_displacement_rc[i] = mean_displacement_rc[i - 1]
+
         for i in range(motion_par_rc.shape[1]):
             if (motion_par_rc[0, i] == -1 and motion_par_rc[0, i - 1] != -1):
                 motion_par_rc[:, i] = motion_par_rc[:, i - 1]
@@ -620,18 +624,20 @@ class MeanDisplacementCalculation(BaseInterface):
                    mean_displacement_rc, motion_par_rc, start_times,
                    offset_indexes, all_mats4average, motion_par,
                    corrupted_volume_names]
+
         to_save_name = ['mean_displacement', 'mean_displacement_consecutive',
                         'mean_displacement_rc', 'motion_par_rc', 'start_times',
                         'offset_indexes', 'mats4average', 'motion_par',
                         'severe_motion_detection_report']
+
         for i in range(len(to_save)):
-            np.savetxt(to_save_name[i] + '.txt', np.asarray(to_save[i]),
-                       fmt='%s')
+            np.savetxt(to_save_name[i] + '.txt', np.asarray(to_save[i]), fmt='%s')
 
         return runtime
 
     def rmsdiff(self, cog, T1, T2):
         """Python implementation of the rmsdiff function in fsl"""
+
         R = 80
         M = np.dot(T2, np.linalg.inv(T1)) - np.identity(4)
         A = M[:3, :3]
@@ -650,6 +656,7 @@ class MeanDisplacementCalculation(BaseInterface):
         that there is no scales or skew effect. Furthermore, if moco=True,
         it returns the rigid body motion parameters in Siemens moco series
         convetion."""
+
         c = np.asarray(com)
         trans_init = mat[:3, -1]
         rot_mat = mat[:3, :3]
@@ -659,6 +666,7 @@ class MeanDisplacementCalculation(BaseInterface):
         trans_x = trans_tot[0]
         trans_y = trans_tot[1]
         trans_z = trans_tot[2]
+
         if moco:
             rot_x_moco = -self.rad2degree(rot_y)
             rot_y_moco = self.rad2degree(rot_x)
@@ -666,8 +674,10 @@ class MeanDisplacementCalculation(BaseInterface):
             trans_x_moco = -trans_y
             trans_y_moco = trans_x
             trans_z_moco = -trans_z
-            print([trans_x_moco, trans_y_moco, trans_z_moco, rot_x_moco,
-                   rot_y_moco, rot_z_moco])
+
+            # print([trans_x_moco, trans_y_moco, trans_z_moco, rot_x_moco,
+            #        rot_y_moco, rot_z_moco])
+
         return [rot_x, rot_y, rot_z, trans_x, trans_y, trans_z]
 
     def rad2degree(self, alpha_rad):
@@ -678,12 +688,15 @@ class MeanDisplacementCalculation(BaseInterface):
         shouldBeIdentity = np.dot(Rt, R)
         Identity = np.identity(3, dtype=R.dtype)
         n = np.linalg.norm(Identity - shouldBeIdentity)
+
         return n < 1e-4
 
     def rotationMatrixToEulerAngles(self, R):
         assert(self.isRotationMatrix(R))
+
         cy = math.sqrt(R[0, 0] * R[0, 0] + R[0, 1] * R[0, 1])
         singular = cy < 1e-4
+
         if not singular:
             cz = R[0, 0] / cy
             sz = R[0, 1] / cy
@@ -700,16 +713,18 @@ class MeanDisplacementCalculation(BaseInterface):
             x = math.atan2(sx, cx)
             y = math.atan2(sy, 0.0)
             z = 0.0
+
         return np.array([x, y, z])
 
     def check_max_motion(self, motion_par):
 
         corrupted_vol_rot = np.where(np.abs(
             np.asarray(motion_par)[:, :3]) >= 0.14)[0]
+
         corrupted_vol_trans = np.where(np.abs(
             np.asarray(motion_par)[:, 3:]) >= 20)[0]
-        corrupted_vol = list(set(corrupted_vol_rot.tolist() +
-                                 corrupted_vol_trans.tolist()))
+
+        corrupted_vol = list(set(corrupted_vol_rot.tolist() + corrupted_vol_trans.tolist()))
 
         return corrupted_vol
 
@@ -717,17 +732,14 @@ class MeanDisplacementCalculation(BaseInterface):
         outputs = self._outputs().get()
 
         outputs["mean_displacement"] = os.getcwd() + '/mean_displacement.txt'
-        outputs["mean_displacement_rc"] = (
-            os.getcwd() + '/mean_displacement_rc.txt')
-        outputs["mean_displacement_consecutive"] = (
-            os.getcwd() + '/mean_displacement_consecutive.txt')
+        outputs["mean_displacement_rc"] = (os.getcwd() + '/mean_displacement_rc.txt')
+        outputs["mean_displacement_consecutive"] = (os.getcwd() + '/mean_displacement_consecutive.txt')
         outputs["start_times"] = os.getcwd() + '/start_times.txt'
         outputs["motion_parameters"] = os.getcwd() + '/motion_par.txt'
         outputs["motion_parameters_rc"] = os.getcwd() + '/motion_par_rc.txt'
         outputs["offset_indexes"] = os.getcwd() + '/offset_indexes.txt'
         outputs["mats4average"] = os.getcwd() + '/mats4average.txt'
-        outputs["corrupted_volumes"] = (
-            os.getcwd() + '/severe_motion_detection_report.txt')
+        outputs["corrupted_volumes"] = (os.getcwd() + '/severe_motion_detection_report.txt')
 
         return outputs
 
@@ -737,14 +749,7 @@ class MotionFramingInputSpec(BaseInterfaceInputSpec):
     mean_displacement = File(exists=True)
     mean_displacement_consec = File(exists=True)
     start_times = File(exists=True)
-    motion_threshold = traits.Float(desc='Everytime the mean displacement is '
-                                    'greater than this value (in mm), a new '
-                                    'frame will be initialised. Default 2mm',
-                                    default=2)
-    temporal_threshold = traits.Float(desc='If one frame temporal duration is '
-                                      'shorter than this value (in sec) then '
-                                      'the frame will be discarded. Default '
-                                      '30sec', default=30)
+
     pet_start_time = traits.Str(desc='PET start time', default=None)
     pet_end_time = traits.Str(desc='PET end time', default=None)
     pet_offset = traits.Int(desc='Offset in seconds between the PET start time'
@@ -753,16 +758,21 @@ class MotionFramingInputSpec(BaseInterfaceInputSpec):
     pet_duration = traits.Int(desc='Time, in seconds, the static PET '
                               'reconstruction lasts. Default is from '
                               'pet_start_time+pet_offest to the pet_end_time')
+    motion_threshold = traits.Float(desc='Everytime the mean displacement is '
+                                    'greater than this value (in mm), a new '
+                                    'frame will be initialised. Default 2mm',
+                                    default=2)
+    temporal_threshold = traits.Float(desc='If one frame temporal duration is '
+                                      'shorter than this value (in sec) then '
+                                      'the frame will be discarded. Default '
+                                      '30sec', default=30)
 
 
 class MotionFramingOutputSpec(TraitedSpec):
 
-    frame_start_times = File(exists=True, desc='start times of each of the '
-                             'detected frame in real clock time.')
-    frame_vol_numbers = File(exists=True, desc='Text file with the number of '
-                             'volume where the motion occurred.')
-    timestamps_dir = Directory(desc='Directory with the timestamps for all'
-                               ' the detected frames')
+    frame_start_times = File(exists=True, desc='start times of each of the detected frame in real clock time.')
+    frame_vol_numbers = File(exists=True, desc='Text file with the number of volume where the motion occurred.')
+    timestamps_dir = Directory(desc='Directory with the timestamps for all the detected frames')
 
 
 class MotionFraming(BaseInterface):
@@ -772,72 +782,79 @@ class MotionFraming(BaseInterface):
 
     def _run_interface(self, runtime):
 
-        mean_displacement = np.loadtxt(self.inputs.mean_displacement,
-                                       dtype=float)
-        mean_displacement_consecutive = np.loadtxt(
-            self.inputs.mean_displacement_consec, dtype=float)
-        th = self.inputs.motion_threshold
+        mean_displacement = np.loadtxt(self.inputs.mean_displacement, dtype=float)
+        mean_displacement_consecutive = np.loadtxt(self.inputs.mean_displacement_consec, dtype=float)
         start_times = np.loadtxt(self.inputs.start_times, dtype=str)
+
         temporal_th = self.inputs.temporal_threshold
+        th = self.inputs.motion_threshold
         pet_st = self.inputs.pet_start_time
         pet_endtime = self.inputs.pet_end_time
+
         if not pet_st and not pet_endtime:
             pet_st = None
             pet_endtime = None
         else:
             if isdefined(self.inputs.pet_offset):
                 offset = self.inputs.pet_offset
-                pet_st = (dt.datetime.strptime(pet_st, '%H%M%S.%f') +
+                pet_st = (dt.datetime.strptime(str(pet_st), '%H%M%S.%f') +
                           dt.timedelta(seconds=offset)).strftime('%H%M%S.%f')
             if (isdefined(self.inputs.pet_duration) and
                     self.inputs.pet_duration > 0):
                 pet_len = self.inputs.pet_duration
-                pet_endtime = ((dt.datetime.strptime(pet_st, '%H%M%S.%f') +
+                pet_endtime = ((dt.datetime.strptime(str(pet_st), '%H%M%S.%f') +
                                 dt.timedelta(seconds=pet_len))
                                .strftime('%H%M%S.%f'))
 
         md_0 = mean_displacement[0]
         max_md = mean_displacement[0]
+
         frame_vol = [0]
         frame_st4pet = []
 
-        scan_duration = [
-            (dt.datetime.strptime(start_times[i], '%H%M%S.%f') -
-             dt.datetime.strptime(start_times[i - 1], '%H%M%S.%f')
-             ).total_seconds() for i in range(1, len(start_times))]
+        scan_duration = [(dt.datetime.strptime(str(start_times[i]), '%H%M%S.%f') -
+                          dt.datetime.strptime(str(start_times[i - 1]), '%H%M%S.%f')).total_seconds() for i in range(1, len(start_times))]
 
         for i, md in enumerate(mean_displacement[1:]):
 
             current_md = md
-            if (np.abs(md_0 - current_md) > th or
-                    np.abs(max_md - current_md) > th):
+
+            if (np.abs(md_0 - current_md) > th or np.abs(max_md - current_md) > th):
                 duration = np.sum(scan_duration[frame_vol[-1]:i + 1])
+
                 if duration > temporal_th:
                     if i + 1 not in frame_vol:
                         frame_vol.append(i + 1)
 
                     md_0 = current_md
                     max_md = current_md
+
                 else:
                     prev_md = mean_displacement[frame_vol[-1]]
+
                     if (prev_md - current_md) > th * 2:
                         frame_vol.remove(frame_vol[-1])
                     elif (current_md - prev_md) > th:
                         frame_vol.remove(frame_vol[-1])
                         frame_vol.append(i)
+
             elif mean_displacement_consecutive[i] > th:
                 duration = np.sum(scan_duration[frame_vol[-1]:i + 1])
                 if duration > temporal_th:
                     if i + 1 not in frame_vol:
                         frame_vol.append(i + 1)
+
                     md_0 = current_md
                     max_md = current_md
+
             elif current_md > max_md:
                 max_md = current_md
+
             elif current_md < md_0:
                 md_0 = current_md
 
         duration = np.sum(scan_duration[frame_vol[-1]:i + 2])
+
         if duration > temporal_th:
             if (i + 2) not in frame_vol:
                 frame_vol.append(i + 2)
@@ -847,66 +864,79 @@ class MotionFraming(BaseInterface):
 
         frame_vol = sorted(frame_vol)
         frame_start_times = [start_times[x] for x in frame_vol]
+
         if pet_st and pet_endtime:
-            frame_st4pet = [
-                x for x in frame_start_times if
-                (dt.datetime.strptime(x, '%H%M%S.%f') >
-                 dt.datetime.strptime(pet_st, '%H%M%S.%f') and
-                 dt.datetime.strptime(x, '%H%M%S.%f') <
-                 dt.datetime.strptime(pet_endtime, '%H%M%S.%f'))]
+            frame_st4pet = [x for x in frame_start_times if
+                                (dt.datetime.strptime(str(x), '%H%M%S.%f') >
+                                dt.datetime.strptime(str(pet_st), '%H%M%S.%f') and
+                                dt.datetime.strptime(str(x), '%H%M%S.%f') <
+                                dt.datetime.strptime(str(pet_endtime), '%H%M%S.%f'))]
+
             if frame_start_times[0] in frame_st4pet:
                 frame_st4pet.remove(frame_start_times[0])
+
             if frame_start_times[-1] in frame_st4pet:
                 frame_st4pet.remove(frame_start_times[-1])
+
             frame_st4pet.append(pet_st)
             frame_st4pet.append(pet_endtime)
             frame_st4pet = sorted(frame_st4pet)
-            if ((dt.datetime.strptime(frame_st4pet[1], '%H%M%S.%f') -
-                    dt.datetime.strptime(frame_st4pet[0], '%H%M%S.%f'))
-                    .total_seconds() < 30):
+
+            if ((dt.datetime.strptime(str(frame_st4pet[1]), '%H%M%S.%f') -
+                    dt.datetime.strptime(str(frame_st4pet[0]), '%H%M%S.%f')).total_seconds() < 30):
                 frame_st4pet.remove(frame_st4pet[1])
-            if ((dt.datetime.strptime(frame_st4pet[-1], '%H%M%S.%f') -
-                    dt.datetime.strptime(frame_st4pet[-2], '%H%M%S.%f'))
-                    .total_seconds() < 30):
+
+            if ((dt.datetime.strptime(str(frame_st4pet[-1]), '%H%M%S.%f') -
+                    dt.datetime.strptime(str(frame_st4pet[-2]), '%H%M%S.%f')).total_seconds() < 30):
                 frame_st4pet.remove(frame_st4pet[-2])
+
             frame_vol = [i for i in range(len(start_times)) for j in
-                         range(len(frame_st4pet)) if start_times[i] ==
-                         frame_st4pet[j]]
-            if (dt.datetime.strptime(start_times[0], '%H%M%S.%f') >
-                    dt.datetime.strptime(pet_st, '%H%M%S.%f')):
+                            range(len(frame_st4pet)) if start_times[i] == frame_st4pet[j]]
+
+            if (dt.datetime.strptime(str(start_times[0]), '%H%M%S.%f') >
+                    dt.datetime.strptime(str(pet_st), '%H%M%S.%f')):
                 frame_vol.append(0)
             else:
                 vol = [i for i in range(len(start_times)) if
-                       (dt.datetime.strptime(start_times[i], '%H%M%S.%f') <
-                        dt.datetime.strptime(frame_st4pet[0], '%H%M%S.%f') and
-                        dt.datetime.strptime(start_times[i + 1], '%H%M%S.%f') >
-                        dt.datetime.strptime(frame_st4pet[0], '%H%M%S.%f'))]
+                       (dt.datetime.strptime(str(start_times[i]), '%H%M%S.%f') <
+                        dt.datetime.strptime(str(frame_st4pet[0]), '%H%M%S.%f') and
+                        dt.datetime.strptime(str(start_times[i + 1]), '%H%M%S.%f') >
+                        dt.datetime.strptime(str(frame_st4pet[0]), '%H%M%S.%f'))]
+
                 frame_vol.append(vol[0])
-            if (dt.datetime.strptime(start_times[-1], '%H%M%S.%f') <
-                    dt.datetime.strptime(pet_endtime, '%H%M%S.%f')):
+
+            if (dt.datetime.strptime(str(start_times[-1]), '%H%M%S.%f') <
+                    dt.datetime.strptime(str(pet_endtime), '%H%M%S.%f')):
                 frame_vol.append(len(start_times) - 1)
             else:
                 vol = [i for i in range(len(start_times)) if
-                       (dt.datetime.strptime(start_times[i], '%H%M%S.%f') <
-                        dt.datetime.strptime(frame_st4pet[-1], '%H%M%S.%f') and
-                        dt.datetime.strptime(start_times[i + 1], '%H%M%S.%f') >
-                        dt.datetime.strptime(frame_st4pet[-1], '%H%M%S.%f'))]
+                       (dt.datetime.strptime(str(start_times[i]), '%H%M%S.%f') <
+                        dt.datetime.strptime(str(frame_st4pet[-1]), '%H%M%S.%f') and
+                        dt.datetime.strptime(str(start_times[i + 1]), '%H%M%S.%f') >
+                        dt.datetime.strptime(str(frame_st4pet[-1]), '%H%M%S.%f'))]
+
                 frame_vol.append(vol[0])
+
             frame_vol = sorted(frame_vol)
-        np.savetxt('frame_start_times.txt', np.asarray(frame_start_times),
-                   fmt='%s')
+
+        np.savetxt('frame_start_times.txt', np.asarray(frame_start_times), fmt='%s')
+
         os.mkdir('timestamps')
+
         if frame_st4pet:
             timestamps_2save = frame_st4pet
+
         else:
             timestamps_2save = frame_start_times
-        np.savetxt('timestamps/frame_start_times_4PET.txt',
-                   np.asarray(timestamps_2save), fmt='%s')
+
+        np.savetxt('timestamps/frame_start_times_4PET.txt', np.asarray(timestamps_2save), fmt='%s')
+
         for i in range(len(timestamps_2save) - 1):
             with open('timestamps/timestamps_Frame{}.txt'
                       .format(str(i).zfill(3)), 'w') as f:
                 f.write(timestamps_2save[i] + '\n' + timestamps_2save[i + 1])
             f.close()
+
         np.savetxt('frame_vol_numbers.txt', np.asarray(frame_vol), fmt='%s')
 
         return runtime
@@ -923,16 +953,11 @@ class MotionFraming(BaseInterface):
 
 class PlotMeanDisplacementRCInputSpec(BaseInterfaceInputSpec):
 
-    mean_disp_rc = File(exists=True, desc='Text file containing the mean '
-                        'displacement real clock.')
-    motion_par_rc = File(exists=True, desc='Text file containing the motion '
-                         'parameters real clock.')
-    frame_start_times = File(exists=True, desc='Frame start times as detected'
-                             'by the motion framing pipeline')
-    false_indexes = File(exists=True, desc='Time indexes were the scanner was '
-                         'idling, i.e. there is no motion information.')
-    framing = traits.Bool(desc='If true, the frame start times will be plotted'
-                          'in the final image.')
+    mean_disp_rc = File(exists=True, desc='Text file containing the mean displacement real clock.')
+    motion_par_rc = File(exists=True, desc='Text file containing the motion parameters real clock.')
+    frame_start_times = File(exists=True, desc='Frame start times as detected by the motion framing pipeline')
+    false_indexes = File(exists=True, desc='Time indexes were the scanner was idling, i.e. there is no motion information.')
+    framing = traits.Bool(desc='If true, the frame start times will be plotted in the final image.')
 
 
 class PlotMeanDisplacementRCOutputSpec(TraitedSpec):
@@ -957,35 +982,33 @@ class PlotMeanDisplacementRC(BaseInterface):
             plot_mp = True
         else:
             plot_mp = False
+
         plot_offset = True
         dates = np.arange(0, len(mean_disp_rc), 1)
         indxs = np.zeros(len(mean_disp_rc), int) + 1
         indxs[false_indexes] = 0
-        start_true_period = [
-            x for x in range(1, len(indxs)) if indxs[x] == 1 and
-            indxs[x - 1] == 0]
-        end_true_period = [
-            x for x in range(len(indxs) - 1) if indxs[x] == 0 and
-            indxs[x - 1] == 1]
+        start_true_period = [ x for x in range(1, len(indxs)) if indxs[x] == 1 and indxs[x - 1] == 0]
+        end_true_period = [ x for x in range(len(indxs) - 1) if indxs[x] == 0 and indxs[x - 1] == 1]
         start_true_period.append(1)
         end_true_period.append(len(dates))
         start_true_period = sorted(start_true_period)
         end_true_period = sorted(end_true_period)
+
         if len(start_true_period) == len(end_true_period) - 1:
             end_true_period.remove(end_true_period[-1])
+
         elif len(start_true_period) != len(end_true_period):
-            print('Something went wrong in the identification of the MR '
-                  'idling time. It will not be plotted.')
+            print('Something went wrong in the identification of the MR idling time. It will not be plotted.')
             plot_offset = False
 
-        self.gen_plot(dates, mean_disp_rc, plot_offset, start_true_period,
-                      end_true_period)
+        self.gen_plot(dates, mean_disp_rc, plot_offset, start_true_period, end_true_period)
+
         if plot_mp:
             for i in range(2):
                 mp = motion_par_rc[i * 3:(i + 1) * 3, :]
-                self.gen_plot(
-                    dates, mp, plot_offset, start_true_period, end_true_period,
-                    plot_mp=plot_mp, mp_ind=i)
+                self.gen_plot(dates, mp, plot_offset, 
+                              start_true_period, end_true_period,
+                              plot_mp=plot_mp, mp_ind=i)
 
         return runtime
 
@@ -1000,8 +1023,10 @@ class PlotMeanDisplacementRC(BaseInterface):
         fig.set_size_inches(21, 9)
         ax.set_xlim(0, dates[-1])
         ax.set_ylim(25, 60)
+
         if plot_mp:
             col = ['b', 'g', 'r']
+
         if plot_offset:
             for i in range(0, len(start_true_period)):
                 if plot_mp:
@@ -1039,23 +1064,20 @@ class PlotMeanDisplacementRC(BaseInterface):
             cl = 'yellow'
             for i in range(len(frame_start_times[:-1])):
 
-                tt = (
-                    (dt.datetime.strptime(str(frame_start_times[i]),
-                                          '%H%M%S.%f') -
-                     dt.datetime.strptime(str(frame_start_times[0]),
-                                          '%H%M%S.%f'))
-                    .total_seconds() * 1000)
+                tt = ((dt.datetime.strptime(str(frame_start_times[i]), '%H%M%S.%f') -
+                     dt.datetime.strptime(str(frame_start_times[0]), '%H%M%S.%f')).total_seconds() * 1000)
+
                 if tt >= len(dates):
                     tt = len(dates) - 1
+
                 plot.axvline(dates[int(tt)], c='b', alpha=0.3, ls='--')
 
-                tt1 = ((dt.datetime.strptime(str(frame_start_times[i + 1]),
-                                             '%H%M%S.%f') -
-                        dt.datetime.strptime(str(frame_start_times[0]),
-                                             '%H%M%S.%f'))
-                       .total_seconds() * 1000)
+                tt1 = ((dt.datetime.strptime(str(frame_start_times[i + 1]), '%H%M%S.%f') -
+                        dt.datetime.strptime(str(frame_start_times[0]), '%H%M%S.%f')).total_seconds() * 1000)
+
                 if tt1 >= len(dates):
                     tt1 = len(dates) - 1
+
                 plot.axvspan(dates[int(tt)], dates[int(tt1)], facecolor=cl,
                              alpha=0.4, linewidth=0)
 
@@ -1065,8 +1087,7 @@ class PlotMeanDisplacementRC(BaseInterface):
                     cl = 'yellow'
 
         indx = np.arange(0, len(dates), 300000)
-        my_thick = [str(i) for i in np.arange(0, len(dates) / 60000, 5,
-                                              dtype=int)]
+        my_thick = [str(i) for i in np.arange(0, len(dates) / 60000, 5, dtype=int)]
         plot.xticks(dates[indx], my_thick)
 #         ax.set_yscale('log')
 #         ax.set_yticks([10, 30, 50])
@@ -1075,31 +1096,31 @@ class PlotMeanDisplacementRC(BaseInterface):
 #         y = [0, 1, 2, 3, 4, 5, 10, 30, 35, 40, 45, 50, 55, 60]
         plot.yticks(my_y_ticks, my_y_ticks)
         plot.xlabel('Time [min]', fontsize=25)
+
         if mp_ind == 0:
             ax.set_ylim(np.min(to_plot) - 0.1, np.max(to_plot) + 0.1)
             plot.legend(['Rotation X', 'Rotation Y', 'Rotation Z'], loc=0)
             plot.ylabel('Rotation [rad]', fontsize=25)
             plot.savefig('Rotation_real_clock.png')
+
         elif mp_ind == 1:
             ax.set_ylim(np.min(to_plot) - 0.5, np.max(to_plot) + 0.5)
-            plot.legend(
-                ['Translation X', 'Translation Y', 'Translation Z'], loc=0)
+            plot.legend(['Translation X', 'Translation Y', 'Translation Z'], loc=0)
             plot.ylabel('Translation [mm]', fontsize=25)
             plot.savefig('Translation_real_clock.png')
+
         else:
             plot.ylabel('Mean displacement [mm]', fontsize=25)
             plot.savefig('mean_displacement_real_clock.png')
+
         plot.close()
 
     def _list_outputs(self):
         outputs = self._outputs().get()
 
-        outputs["mean_disp_plot"] = (
-            os.getcwd() + '/mean_displacement_real_clock.png')
-        outputs["rot_plot"] = (
-            os.getcwd() + '/Rotation_real_clock.png')
-        outputs["trans_plot"] = (
-            os.getcwd() + '/Translation_real_clock.png')
+        outputs["mean_disp_plot"] = (os.getcwd() + '/mean_displacement_real_clock.png')
+        outputs["rot_plot"] = (os.getcwd() + '/Rotation_real_clock.png')
+        outputs["trans_plot"] = (os.getcwd() + '/Translation_real_clock.png')
 
         return outputs
 
@@ -1112,9 +1133,7 @@ class AffineMatAveragingInputSpec(BaseInterfaceInputSpec):
 
 class AffineMatAveragingOutputSpec(TraitedSpec):
 
-    average_mats = Directory(exists=True, desc='directory with all the average'
-                             ' transformation matrices for each detected '
-                             'frame.')
+    average_mats = Directory(exists=True, desc='directory with all the average transformation matrices for each detected frame.')
 
 
 class AffineMatAveraging(BaseInterface):
@@ -1142,19 +1161,19 @@ class AffineMatAveraging(BaseInterface):
                 else:
                     mat_tot[:, :, j] = mat
                     n_vol += 1
+
             if n_vol > 0:
                 average_mat = np.sum(mat_tot, axis=2) / n_vol
             else:
                 average_mat = idt
 
-            np.savetxt(
-                'average_matrix_vol_{0}-{1}.txt'
-                .format(str(v1).zfill(4), str(v2).zfill(4)), average_mat)
+            np.savetxt('average_matrix_vol_{0}-{1}.txt'.format(str(v1).zfill(4), str(v2).zfill(4)), average_mat)
 
         if os.path.isdir('frame_mean_transformation_mats') is False:
             os.mkdir('frame_mean_transformation_mats')
 
         mats = glob.glob('average_matrix_vol*')
+
         for m in mats:
             shutil.move(m, 'frame_mean_transformation_mats')
 
@@ -1163,8 +1182,7 @@ class AffineMatAveraging(BaseInterface):
     def _list_outputs(self):
         outputs = self._outputs().get()
 
-        outputs["average_mats"] = (
-            os.getcwd() + '/frame_mean_transformation_mats')
+        outputs["average_mats"] = (os.getcwd() + '/frame_mean_transformation_mats')
 
         return outputs
 
@@ -1189,13 +1207,14 @@ class PetCorrectionFactor(BaseInterface):
 
         frame_st = np.loadtxt(
             self.inputs.timestamps + '/frame_start_times_4PET.txt', dtype=str)
-        start = dt.datetime.strptime(frame_st[0], '%H%M%S.%f')
-        end = dt.datetime.strptime(frame_st[-1], '%H%M%S.%f')
+        start = dt.datetime.strptime(str(frame_st[0]), '%H%M%S.%f')
+        end = dt.datetime.strptime(str(frame_st[-1]), '%H%M%S.%f')
         total_duration = (end - start).total_seconds()
         corr_factors = []
+
         for t in range(len(frame_st) - 1):
-            start = dt.datetime.strptime(frame_st[t], '%H%M%S.%f')
-            end = dt.datetime.strptime(frame_st[t + 1], '%H%M%S.%f')
+            start = dt.datetime.strptime(str(frame_st[t]), '%H%M%S.%f')
+            end = dt.datetime.strptime(str(frame_st[t + 1]), '%H%M%S.%f')
             d = (end - start).total_seconds()
             corr_factors.append(d / total_duration)
 
@@ -1209,8 +1228,7 @@ class PetCorrectionFactor(BaseInterface):
     def _list_outputs(self):
         outputs = self._outputs().get()
 
-        outputs["corr_factors"] = (
-            os.getcwd() + '/correction_factors_PET_data.txt')
+        outputs["corr_factors"] = (os.getcwd() + '/correction_factors_PET_data.txt')
 
         return outputs
 
@@ -1431,11 +1449,13 @@ class FixedBinning(BaseInterface):
             pet_len = bin_len * n_frames
 
         MR_start_time = dt.datetime.strptime(str(start_times[0]), '%H%M%S.%f')
+
         start_times_diff = [
             (dt.datetime.strptime(str(start_times[i + 1]), '%H%M%S.%f') -
              dt.datetime.strptime(
                  str(start_times[i]), '%H%M%S.%f')).total_seconds()
             for i in range(len(start_times) - 1)]
+
         scan_duration = np.cumsum(np.asarray(start_times_diff))
 
         pet_st = (dt.datetime.strptime(pet_start_time, '%H%M%S.%f') +
@@ -1444,17 +1464,20 @@ class FixedBinning(BaseInterface):
                    range(0, pet_len, bin_len)]
         MrBins = [MR_start_time + dt.timedelta(seconds=x)
                   for x in scan_duration]
+
         MrStartPoints = [MrBins[i] + dt.timedelta(
             seconds=(MrBins[i + 1] - MrBins[i]).total_seconds() / 2) for i in
             range(len(MrBins) - 1)]
 
         indxs = []
         PetBins.append(pet_st + dt.timedelta(seconds=pet_len))
+
         if pet_offset != 0:
             print(('PET start time offset of {0} seconds detected. '
                    'Fixed binning will start at {2} and will last '
                    'for {1} seconds.'.format(str(pet_offset), str(pet_len),
                                              pet_st.strftime('%H%M%S.%f'))))
+
         for pet_bin in PetBins:
 
             for i in range(len(MrStartPoints) - 1):
@@ -1471,10 +1494,13 @@ class FixedBinning(BaseInterface):
                 elif pet_bin < MrStartPoints[i]:
                     indxs.append([[1, i], [0, i + 1]])
                     break
+
         while len(indxs) < len(PetBins):
             indxs.append([[0, len(MrStartPoints) - 2],
                           [1, len(MrStartPoints) - 1]])
+
         z = 0
+
         for ii in range(len(indxs) - 1):
             start = indxs[ii]
             end = indxs[ii + 1]
@@ -1482,6 +1508,7 @@ class FixedBinning(BaseInterface):
             e1 = start[1][1]
             s2 = end[0][1]
             e2 = end[1][1]
+
             if s1 == s2 and e1 == e2:
                 mat_s1 = np.loadtxt(motion_mats[s1])
                 mat_e1 = np.loadtxt(motion_mats[e1])
@@ -1490,8 +1517,8 @@ class FixedBinning(BaseInterface):
                     'average_motion_mat_bin_{0}.txt'.format(str(z).zfill(3)),
                     av_mat)
                 z = z + 1
-            elif (s1 + 1 == s2 and e1 + 1 == e2) or (s1 + 2 == s2 and
-                                                     e1 + 2 == e2):
+
+            elif (s1 + 1 == s2 and e1 + 1 == e2) or (s1 + 2 == s2 and e1 + 2 == e2):
                 mat_s1 = np.loadtxt(motion_mats[s1])
                 mat_e1 = np.loadtxt(motion_mats[e1])
                 mat_s2 = np.loadtxt(motion_mats[s2])
@@ -1499,29 +1526,29 @@ class FixedBinning(BaseInterface):
                 av_mat_1 = start[0][0] * mat_s1 + start[1][0] * mat_e1
                 av_mat_2 = end[0][0] * mat_s2 + end[1][0] * mat_e2
                 mean_mat = (av_mat_1 + av_mat_2) / 2
-                np.savetxt(
-                    'average_motion_mat_bin_{0}.txt'.format(str(z).zfill(3)),
-                    mean_mat)
+                np.savetxt('average_motion_mat_bin_{0}.txt'.format(str(z).zfill(3)),mean_mat)
                 z = z + 1
+
             else:
                 mat_tot = np.zeros((4, 4, (s2 - s1)))
                 mat_s1 = np.loadtxt(motion_mats[s1])
                 mat_e1 = np.loadtxt(motion_mats[e1])
                 mat_s2 = np.loadtxt(motion_mats[s2])
                 mat_e2 = np.loadtxt(motion_mats[e2])
-                mat_tot[:, :, 0] = (
-                    start[0][0] * mat_s1 + start[1][0] * mat_e1)
-                mat_tot[:, :, -1] = (
-                    end[0][0] * mat_s2 + end[1][0] * mat_e2)
+                mat_tot[:, :, 0] = (start[0][0] * mat_s1 + start[1][0] * mat_e1)
+                mat_tot[:, :, -1] = (end[0][0] * mat_s2 + end[1][0] * mat_e2)
+
                 for i, m in enumerate(range(e1 + 1, s2)):
                     mat_tot[:, :, i + 1] = np.loadtxt(motion_mats[m])
+
                 mean_mat = np.mean(mat_tot, axis=2)
-                np.savetxt(
-                    'average_motion_mat_bin_{0}.txt'
-                    .format(str(z).zfill(3)), mean_mat)
+                np.savetxt('average_motion_mat_bin_{0}.txt'.format(str(z).zfill(3)), mean_mat)
                 z = z + 1
+
         os.mkdir('average_bin_mats')
+
         files = glob.glob('*bin*.txt')
+
         for f in files:
             shutil.move(f, 'average_bin_mats')
 
@@ -1563,8 +1590,7 @@ class ReorientUmap(BaseInterface):
         for nifti in niftis:
             _, base, ext = split_filename(nifti)
             outname = base + '_reorient' + ext
-            cmd = ('mrconvert -strides {0} {1} {2}'
-                   .format(umap, nifti, outname))
+            cmd = ('mrconvert -strides {0} {1} {2}'.format(umap, nifti, outname))
             sp.check_output(cmd, shell=True)
 
         return runtime
@@ -1572,7 +1598,6 @@ class ReorientUmap(BaseInterface):
     def _list_outputs(self):
         outputs = self._outputs().get()
 
-        outputs["reoriented_umaps"] = sorted(glob.glob(
-            os.getcwd() + '/*_reorient.*'))
+        outputs["reoriented_umaps"] = sorted(glob.glob(os.getcwd() + '/*_reorient.*'))
 
         return outputs
