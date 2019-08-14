@@ -330,7 +330,7 @@ class EpiSeriesStudy(EpiStudy, metaclass=StudyMetaClass):
                 output_type='NIFTI_GZ',
                 out_file='moco.nii.gz'),
             inputs={
-                'in_file': ('mag_preproc', nifti_gz_format)},
+                'in_file': ('series_preproc', nifti_gz_format)},
             outputs={
                 'moco': ('out_file', nifti_gz_format),
                 'moco_par': ('par_file', par_format)},

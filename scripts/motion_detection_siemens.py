@@ -95,7 +95,7 @@ if __name__ == "__main__":
     os.makedirs(work_dir, exist_ok=True)
 
     study = MotionDetection(name='MotionDetection',
-                            processor=MultiProc(WORK_PATH, prov_ignore=(MultiProc.DEFAULT_PROV_IGNORE + ['/workflow/.*'])),
+                            processor=MultiProc(work_dir, prov_ignore=(MultiProc.DEFAULT_PROV_IGNORE + ['/workflow/.*'])),
                             environment=(
                                 ModulesEnv() if args.environment == 'modules'
                                 else StaticEnv()),

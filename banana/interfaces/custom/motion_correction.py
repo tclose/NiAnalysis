@@ -556,7 +556,7 @@ class MeanDisplacementCalculation(BaseInterface):
                         dt.datetime.strptime(str(study_start_time), '%H%M%S.%f') +
                         dt.timedelta(seconds=start_scan)).strftime('%H%M%S.%f'))
 
-                    end_scan = start_scan + tr
+                    end_scan = start_scan + tr * 1000
                     m = np.loadtxt(mat)
                     md = self.rmsdiff(ref_cog, m, idt_mat)
                     mean_displacement_rc[int(start_scan * 1000):int(end_scan * 1000)] = md
@@ -588,6 +588,7 @@ class MeanDisplacementCalculation(BaseInterface):
         start_times.append((
             dt.datetime.strptime(str(study_start_time), '%H%M%S.%f') +
             dt.timedelta(seconds=end_scan)).strftime('%H%M%S.%f'))
+
         mean_displacement_consecutive = []
 
         for i in range(len(all_mats) - 1):

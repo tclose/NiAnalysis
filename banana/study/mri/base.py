@@ -196,7 +196,7 @@ class MriStudy(Study, metaclass=StudyMetaClass):
                   desc=("")),
         ParamSpec('resampled_resolution', None, dtype=list,
                   desc=("")),
-        SwitchSpec('coreg_method', 'ants', ('ants', 'flirt', 'spm'),
+        SwitchSpec('coreg_method', 'flirt', ('ants', 'flirt', 'spm'),
                    desc="The tool to use for linear registration"),
         ParamSpec('flirt_degrees_of_freedom', 6, desc=(
             "Number of degrees of freedom used in the registration. "
