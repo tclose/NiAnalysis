@@ -113,13 +113,13 @@ class DwiStudy(EpiSeriesStudy, metaclass=StudyMetaClass):
     add_param_specs = [
         ParamSpec('multi_tissue', True,
                   desc=("")),
-        ParamSpec('preproc_pe_dir', "RL", dtype=str,
+        ParamSpec('preproc_pe_dir', "LR", dtype=str,
                   desc=("")),
         ParamSpec('tbss_skel_thresh', 0.2,
                   desc=("")),
         ParamSpec('fsl_mask_f', 0.25,
                   desc=("")),
-        ParamSpec('bet_robust', True,
+        SwitchSpec('bet_robust', True,
                   desc=("")),
         ParamSpec('bet_f_threshold', 0.2,
                   desc=("")),
@@ -136,7 +136,7 @@ class DwiStudy(EpiSeriesStudy, metaclass=StudyMetaClass):
                    desc=("")),
         SwitchSpec('fod_algorithm', 'csd', ('csd', 'msmt_csd'),
                    desc=("")),
-        MriStudy.param_spec('bet_method').with_new_choices('mrtrix'),
+        #MriStudy.param_spec('bet_method').with_new_choices('mrtrix'),
         SwitchSpec('reorient2std', False,
                    desc=(""))]
 
@@ -434,48 +434,48 @@ class DwiStudy(EpiSeriesStudy, metaclass=StudyMetaClass):
             want to use
         """
 
-        if self.branch('bet_method', 'mrtrix'):
-            pipeline = self.new_pipeline(
-                'brain_extraction',
-                desc="Generate brain mask from b0 images",
-                citations=[mrtrix_cite],
-                name_maps=name_maps)
+        # if self.branch('bet_method', 'mrtrix'):
+        #     pipeline = self.new_pipeline(
+        #         'brain_extraction',
+        #         desc="Generate brain mask from b0 images",
+        #         citations=[mrtrix_cite],
+        #         name_maps=name_maps)
 
-            if self.provided('coreg_ref'):
-                series = 'series_coreg'
-            else:
-                series = 'series_preproc'
+        #     if self.provided('coreg_ref'):
+        #         series = 'series_coreg'
+        #     else:
+        #         series = 'series_preproc'
 
-            # Create mask node
-            masker = pipeline.add(
-                'dwi2mask',
-                BrainMask(
-                    out_file='brain_mask.nii.gz'),
-                inputs={
-                    'in_file': (series, nifti_gz_format),
-                    'grad_fsl': self.fsl_grads(pipeline, coregistered=False)},
-                outputs={
-                    'brain_mask': ('out_file', nifti_gz_format)},
-                requirements=[mrtrix_req.v('3.0rc3')])
+        #     # Create mask node
+        #     masker = pipeline.add(
+        #         'dwi2mask',
+        #         BrainMask(
+        #             out_file='brain_mask.nii.gz'),
+        #         inputs={
+        #             'in_file': (series, nifti_gz_format),
+        #             'grad_fsl': self.fsl_grads(pipeline, coregistered=False)},
+        #         outputs={
+        #             'brain_mask': ('out_file', nifti_gz_format)},
+        #         requirements=[mrtrix_req.v('3.0rc3')])
 
-            merge = pipeline.add(
-                'merge_operands',
-                Merge(2),
-                inputs={
-                    'in1': ('mag_preproc', nifti_gz_format),
-                    'in2': (masker, 'out_file')})
+        #     merge = pipeline.add(
+        #         'merge_operands',
+        #         Merge(2),
+        #         inputs={
+        #             'in1': ('mag_preproc', nifti_gz_format),
+        #             'in2': (masker, 'out_file')})
 
-            pipeline.add(
-                'apply_mask',
-                MRCalc(
-                    operation='multiply'),
-                inputs={
-                    'operands': (merge, 'out')},
-                outputs={
-                    'brain': ('out_file', nifti_gz_format)},
-                requirements=[mrtrix_req.v('3.0rc3')])
-        else:
-            pipeline = super().brain_extraction_pipeline(**name_maps)
+        #     pipeline.add(
+        #         'apply_mask',
+        #         MRCalc(
+        #             operation='multiply'),
+        #         inputs={
+        #             'operands': (merge, 'out')},
+        #         outputs={
+        #             'brain': ('out_file', nifti_gz_format)},
+        #         requirements=[mrtrix_req.v('3.0rc3')])
+        # else:
+        pipeline = super().brain_extraction_pipeline(**name_maps)
         return pipeline
 
     def series_coreg_pipeline(self, **name_maps):

@@ -1023,7 +1023,7 @@ class PlotMeanDisplacementRC(BaseInterface):
         fig, ax = plot.subplots()
         fig.set_size_inches(21, 9)
         ax.set_xlim(0, dates[-1])
-        ax.set_ylim(25, 60)
+        ax.set_ylim(0, 60)
 
         if plot_mp:
             col = ['b', 'g', 'r']
