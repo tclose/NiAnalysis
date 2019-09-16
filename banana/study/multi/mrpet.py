@@ -741,37 +741,38 @@ def create_motion_detection_class(name, ref=None, ref_type=None, t1s=None,
         b0_refspec.update({'coreg_ref_wmseg': 'ref_wm_seg',
                            'coreg_ref': 'ref_mag_preproc'})
 
-        if dwis_main and not dwis_opposite:
-            logger.warning(
-                'No opposite phase encoding direction b0 provided. DWI '
-                'motion correction will be performed without distortion '
-                'correction. THIS IS SUB-OPTIMAL!')
-            study_specs.extend(
-                SubStudySpec('dwi_{}'.format(i), DwiStudy, ref_spec)
-                for i in range(len(dwis_main)))
-            inputs.extend(
-                InputFilesets('dwi_{}_series'.format(i),
-                              dwis_main_scan[0], dicom_format)
-                for i, dwis_main_scan in enumerate(dwis_main))
+        if dwis_main:
 
-        if dwis_main and dwis_opposite:
             study_specs.extend(
                 SubStudySpec('dwi_{}'.format(i), DwiStudy, ref_spec)
                 for i in range(len(dwis_main)))
             inputs.extend(
-                InputFilesets(
-                    'dwi_{}_series'.format(i), dwis_main[i][0], dicom_format)
+                InputFilesets('dwi_{}_series'.format(i), scan[0], dicom_format)
+                for i, scan in enumerate(dwis_main))
+            param_specs.extend(
+                ParamSpec(
+                    name='dwi_{}_coreg_method'.format(i),
+                    default='flirt',
+                    choices=EpiSeriesStudy.param_spec('coreg_method').choices,
+                    desc=EpiSeriesStudy.param_spec('coreg_method').desc)
                 for i in range(len(dwis_main)))
-            if len(dwis_main) <= len(dwis_opposite):
-                inputs.extend(InputFilesets('dwi_{}_magnitude'.format(i),
-                                            dwis_opposite[i][0],
-                                            dicom_format)
-                              for i in range(len(dwis_main)))
+
+            if dwis_opposite:
+                if len(dwis_main) <= len(dwis_opposite):
+                    inputs.extend(InputFilesets('dwi_{}_magnitude'.format(i),
+                                                dwis_opposite[i][0],
+                                                dicom_format)
+                                  for i in range(len(dwis_main)))
+                else:
+                    inputs.extend(InputFilesets('dwi_{}_magnitude'.format(i),
+                                                dwis_opposite[0][0],
+                                                dicom_format)
+                                  for i in range(len(dwis_main)))
             else:
-                inputs.extend(InputFilesets('dwi_{}_magnitude'.format(i),
-                                            dwis_opposite[0][0],
-                                            dicom_format)
-                              for i in range(len(dwis_main)))
+                logger.warning(
+                    'No opposite phase encoding direction b0 provided. DWI '
+                    'motion correction will be performed without distortion '
+                    'correction. THIS IS SUB-OPTIMAL!')
 
         if dwis_opposite and dwis_main and not dwis_ref:
             study_specs.extend(
@@ -797,15 +798,15 @@ def create_motion_detection_class(name, ref=None, ref_type=None, t1s=None,
             inputs.extend(
                 InputFilesets('b0_{}_magnitude'.format(i),
                               scan[0], dicom_format)
-                for i, scan in enumerate(dwis_opposite[:min_index] +
-                                         dwis_ref[:min_index]))
+                for i, scan in enumerate(dwis_opposite[:min_index]
+                                         + dwis_ref[:min_index]))
             inputs.extend(
                 InputFilesets('b0_{}_reverse_phase'.format(i),
                               scan[0], dicom_format)
-                for i, scan in enumerate(dwis_ref[:min_index] +
-                                         dwis_opposite[:min_index]))
-            unused_dwi = [scan for scan in dwis_ref[min_index:] +
-                          dwis_opposite[min_index:]]
+                for i, scan in enumerate(dwis_ref[:min_index]
+                                         + dwis_opposite[:min_index]))
+            unused_dwi = [scan for scan in dwis_ref[min_index:]
+                          + dwis_opposite[min_index:]]
 
         elif dwis_opposite or dwis_ref:
             unused_dwi = [scan for scan in dwis_ref + dwis_opposite]
